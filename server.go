@@ -2,7 +2,6 @@ package shimgo
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,8 +25,8 @@ type shimServer struct {
 	uri              string
 	workingDirectory string
 	errors           []string
+	terminate        chan struct{}
 	closed           chan struct{}
-	cancelServer     context.CancelFunc
 	sync.RWMutex
 }
 
@@ -49,6 +48,7 @@ func (s *shimServer) setup() {
 	s.terminated = false
 	s.pid = 0
 	s.errors = []string{}
+	s.terminate = make(chan struct{})
 	s.closed = make(chan struct{})
 
 	port, err := findAvailablePort()
@@ -76,20 +76,18 @@ func (s *shimServer) addError(err error) {
 
 func (s *shimServer) start() {
 	ready := make(chan struct{})
-	ctx := context.TODO()
 	go func() {
 		s.Lock()
-		ctx, s.cancelServer = context.WithCancel(ctx)
 		if s.running {
 			s.Unlock()
-			ready <- struct{}{}
+			close(ready)
 			return
 		}
 
 		if err := s.backend.writeFiles(s.workingDirectory); err != nil {
 			s.errors = append(s.errors, err.Error())
 			s.Unlock()
-			ready <- struct{}{}
+			close(ready)
 			return
 		}
 
@@ -99,7 +97,7 @@ func (s *shimServer) start() {
 		if cmd == nil {
 			s.errors = append(s.errors, "unsupported backend")
 			s.Unlock()
-			ready <- struct{}{}
+			close(ready)
 			return
 		}
 
@@ -112,7 +110,7 @@ func (s *shimServer) start() {
 		if err != nil {
 			s.errors = append(s.errors, err.Error())
 			s.Unlock()
-			ready <- struct{}{}
+			close(ready)
 			return
 		}
 
@@ -121,9 +119,9 @@ func (s *shimServer) start() {
 		s.running = true
 		s.Unlock()
 
-		ready <- struct{}{}
+		close(ready)
 
-		<-ctx.Done()
+		<-s.terminate
 		cmd.Process.Kill()
 
 		s.Lock()
@@ -148,15 +146,13 @@ func (s *shimServer) stop() {
 	}
 
 	s.terminateServer()
-	<-s.closed
 }
 
 func (s *shimServer) terminateServer() {
 	s.RLock()
-	defer s.RUnlock()
-	if s.cancelServer != nil {
-		s.cancelServer()
-	}
+	close(s.terminate)
+	s.RUnlock()
+	<-s.closed
 }
 
 func (s *shimServer) reset() {
