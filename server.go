@@ -93,7 +93,7 @@ func (s *shimServer) start() {
 
 		defer os.RemoveAll(s.workingDirectory)
 
-		cmd := s.backend.getCommand(s.workingDirectory)
+		cmd := s.backend.getCommand(s.workingDirectory, s.port)
 		if cmd == nil {
 			s.errors = append(s.errors, "unsupported backend")
 			s.Unlock()
