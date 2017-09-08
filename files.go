@@ -80,6 +80,7 @@ func init() {
 	serviceFiles = map[string][]byte{
 		pythonService: []byte(`
 import logging
+import sys
 
 try:
     import cStringIO as StringIO
